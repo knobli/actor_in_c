@@ -23,8 +23,11 @@ struct actor_arg {
 void *run_actor(void *arg) {
 	struct actor_arg *params = arg;
 	printf("Actor received Message(%zu): [%s]\n", params->length, params->msg);
+	int number = atoi(params->msg);
 	free(params->msg);
-
+	long square = number * number;
+	printf("%d x %d = %ld\n", number, number, square);
+	//TODO: send square back and notify other process
 	pthread_exit(NULL);
 }
 
@@ -75,12 +78,12 @@ int main(int argc, char** argv) {
 	assert(mq != -1);
 
 	// send a message
-	char *msg = strdup("hello");
+	char *msg = strdup("5");
 	ret = mq_send(mq, msg, strlen(msg) + 1, 0);
 	assert(ret == 0);
 
 	// send a message
-	char *msg2 = strdup("hello2");
+	char *msg2 = strdup("7");
 	ret = mq_send(mq, msg2, strlen(msg2) + 1, 0);
 	assert(ret == 0);
 
