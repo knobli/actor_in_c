@@ -10,89 +10,136 @@
 #include <assert.h>
 #include <errno.h>
 
+#include <concurrentLinkedList.h>
+
+#define CLEANUP_FREQUENCY 10
 #define QUEUE_NAME "/messages"
 #define MAX_MSG_LEN 1024
 
 struct actor_arg {
-	char *msg;
-	ssize_t length;
+  char *msg;
+  ssize_t length;
 };
 
 /* the wanna-be actor. is run by
  * a thread per incoming message */
 void *run_actor(void *arg) {
-	struct actor_arg *params = arg;
-	printf("Actor received Message(%zu): [%s]\n", params->length, params->msg);
-	free(params->msg);
+  struct actor_arg *params = arg;
 
-	pthread_exit(NULL);
+  printf("Actor received Message(%zu): [%s]\n", params->length, params->msg);
+  int x = atoi(params->msg);
+  int y = x*x;
+  printf("Result = %12d\n", y);
+
+  free(params->msg);
+  pthread_exit(NULL);
+}
+
+void *clean_up(void *arg) {
+  ConcurrentLinkedList *threadList = (ConcurrentLinkedList *) arg;
+
+  printf("Hi from cleanup thread \n");
+  pthread_t *thread_to_clean; 
+
+  int num = 0;
+  while (1) { 
+    sleep(CLEANUP_FREQUENCY);
+    printf("Cleanup Thread: Start Removing Threads\n");
+
+    num = 0;
+    // gives back the shallow copy of the element
+    while(getFirstListElement(threadList, (void *)&thread_to_clean) > 1){ 
+
+      int ret = pthread_join(*thread_to_clean, NULL);
+      assert(ret == 0);
+      free(thread_to_clean);
+
+      removeFirstListElement(threadList);
+      num++;
+    }
+    printf("Removed %d Threads\n", num);
+  }
+  // Should never happen!
+  printf("Bye Bye from cleanup thread - ERROR!\n");
+  return (void *) -1;
 }
 
 /* single thread constantly waiting
  * for new messages in the queue.
  * creates actors per message */
 void *dispatch(void *arg) {
-	// open queue
-	mqd_t mq = mq_open(QUEUE_NAME, O_RDONLY | O_NONBLOCK);
-	assert(mq != -1);
+  ConcurrentLinkedList *threadList = (ConcurrentLinkedList *) arg;
+  printf("Hi from dispatcher thread \n");
 
-	int ret;
-	ssize_t nbytes;
-	char *buf;
-	pthread_t *actor;
-	struct actor_arg *aarg;
+  // open queue
+  mqd_t mq = mq_open(QUEUE_NAME, O_RDONLY );
+  assert(mq != -1);
 
-	// wait for and dispatch messages
-	buf = malloc(sizeof(char) * MAX_MSG_LEN);
-	assert(buf != NULL);
-	while ((nbytes = mq_receive(mq, buf, MAX_MSG_LEN, 0)) > 0) {
-		actor = malloc(sizeof(pthread_t));
-		aarg = malloc(sizeof(struct actor_arg));
-		aarg->msg = buf;
-		aarg->length = nbytes;
+  int ret;
+  ssize_t nbytes;
+  struct actor_arg *aarg;
 
-		ret = pthread_create(actor, NULL, run_actor, aarg);
-		assert(ret == 0);
+  pthread_t *nextListEntry = malloc(sizeof(pthread_t));
+  assert(nextListEntry != NULL);
 
-		//TODO: use list of threads and join this at the end
-		pthread_join(*actor, NULL);
+  // wait for and dispatch messages
+  char *buf = malloc(sizeof(char) * MAX_MSG_LEN);
+  assert(buf != NULL);
+  while ((nbytes = mq_receive(mq, buf, MAX_MSG_LEN, 0)) > 0) {
+    aarg = malloc(sizeof(struct actor_arg));
+    aarg->msg = buf;
+    aarg->length = nbytes;
 
-		buf = malloc(sizeof(char) * MAX_MSG_LEN);
-		assert(buf != NULL);
-	}
-	pthread_exit(NULL);
+    ret = pthread_create(nextListEntry, NULL, run_actor, aarg);
+    assert(ret == 0);
+
+    buf = malloc(sizeof(char) * MAX_MSG_LEN);
+    assert(buf != NULL);
+
+    appendListElement(threadList,(void *) &nextListEntry, sizeof(pthread_t), "NoName");
+    nextListEntry = malloc(sizeof(pthread_t));
+    assert(nextListEntry != NULL);
+  }
+  printf("Bye Bye from dispatcher thread - ERROR!\n");
+  pthread_exit(NULL);
 }
 
 int main(int argc, char** argv) {
-	int ret;
+  int ret;
 
-	struct mq_attr mqAttr;
-    mqAttr.mq_maxmsg = 10;
-    mqAttr.mq_msgsize = MAX_MSG_LEN;
+  struct mq_attr mqAttr;
+  mqAttr.mq_maxmsg = 10;
+  mqAttr.mq_msgsize = MAX_MSG_LEN;
 
-	// create queue, open for writing
-	mqd_t mq = mq_open(QUEUE_NAME, O_CREAT | O_WRONLY, 0644, &mqAttr);
-	assert(mq != -1);
+  // create queue, open for writing
+  mqd_t mq = mq_open(QUEUE_NAME, O_CREAT | O_WRONLY, 0644, &mqAttr);
+  assert(mq != -1);
 
-	// send a message
-	char *msg = strdup("hello");
-	ret = mq_send(mq, msg, strlen(msg) + 1, 0);
-	assert(ret == 0);
+  // send a message
+  char *msg = strdup("1");
+  ret = mq_send(mq, msg, strlen(msg) + 1, 0);
+  assert(ret == 0);
 
-	// send a message
-	char *msg2 = strdup("hello2");
-	ret = mq_send(mq, msg2, strlen(msg2) + 1, 0);
-	assert(ret == 0);
+  // send a message
+  char *msg2 = strdup("2");
+  ret = mq_send(mq, msg2, strlen(msg2) + 1, 0);
+  assert(ret == 0);
 
-	// spawn the dispatcher
-	pthread_t dispatcher;
-	ret = pthread_create(&dispatcher, NULL, dispatch, NULL);
-	assert(ret == 0);
+  ConcurrentLinkedList *thread_list = newList();
 
-	// wait for dispatcher to complete
-	pthread_join(dispatcher, NULL);
+  // spawn the dispatcher and housekeeping
+  pthread_t housekeeper;
+  ret = pthread_create(&housekeeper, NULL, clean_up, thread_list);
+  assert(ret == 0);
+  pthread_t dispatcher;
+  ret = pthread_create(&dispatcher, NULL, dispatch, thread_list);
+  assert(ret == 0);
 
-	mq_unlink(QUEUE_NAME);
+  // wait for the threads to complete - will not happen
+  pthread_join(dispatcher, NULL);
+  pthread_join(housekeeper, NULL);
 
-	return EXIT_SUCCESS;
+  mq_unlink(QUEUE_NAME);
+
+  return EXIT_SUCCESS;
 }
