@@ -8,12 +8,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <mqueue.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <assert.h>
 #include <errno.h>
 
 #define QUEUE_NAME "/messages"
+#define RESULT_QUEUE_NAME "/results"
 #define MAX_MSG_LEN 1024
 
 int main(int argc, char** argv) {
@@ -37,6 +39,39 @@ int main(int argc, char** argv) {
   char *msg2 = strdup("2");
   ret = mq_send(mq, msg2, strlen(msg2) + 1, 0);
   assert(ret == 0);
+
+  // send a message
+  char *msg3 = strdup("4");
+  ret = mq_send(mq, msg3, strlen(msg3) + 1, 0);
+  assert(ret == 0);
+
+
+  // send a message
+  char *msg4 = strdup("5");
+  ret = mq_send(mq, msg4, strlen(msg4) + 1, 0);
+  assert(ret == 0);
+
+  printf("Wait for response\n");
+  sleep(1);
+  // open queue
+  mqd_t mq_res = mq_open(RESULT_QUEUE_NAME, O_RDONLY | O_NONBLOCK);
+  assert(mq_res != -1);
+
+  ssize_t nbytes;
+
+  pthread_t *nextListEntry = malloc(sizeof(pthread_t));
+  assert(nextListEntry != NULL);
+
+  // wait for and dispatch messages
+  char *buf = malloc(sizeof(char) * MAX_MSG_LEN);
+  assert(buf != NULL);
+  while ((nbytes = mq_receive(mq_res, buf, MAX_MSG_LEN, 0)) > 0) {
+
+	  printf("Result: %s\n", buf);
+    buf = malloc(sizeof(char) * MAX_MSG_LEN);
+    assert(buf != NULL);
+
+  }
 
   return EXIT_SUCCESS;
 }

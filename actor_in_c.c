@@ -14,6 +14,7 @@
 
 #define CLEANUP_FREQUENCY 10
 #define QUEUE_NAME "/messages"
+#define RESULT_QUEUE_NAME "/results"
 #define MAX_MSG_LEN 1024
 
 struct actor_arg {
@@ -30,6 +31,20 @@ void *run_actor(void *arg) {
   int x = atoi(params->msg);
   int y = x*x;
   printf("Result = %12d\n", y);
+
+  struct mq_attr mqAttr;
+  mqAttr.mq_maxmsg = 10;
+  mqAttr.mq_msgsize = MAX_MSG_LEN;
+
+  // create queue, open for writing
+  mqd_t mq_res = mq_open(RESULT_QUEUE_NAME, O_CREAT | O_WRONLY, 0644, &mqAttr);
+  assert(mq_res != -1);
+
+  // send a message
+  char res[MAX_MSG_LEN + 1];
+  sprintf(res, "%d x %d=%12d", x, x, y);
+  int ret = mq_send(mq_res, res, strlen(res) + 1, 0);
+  assert(ret == 0);
 
   free(params->msg);
   pthread_exit(NULL);
