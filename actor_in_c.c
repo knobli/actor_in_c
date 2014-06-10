@@ -11,6 +11,7 @@
 #include <errno.h>
 
 #define QUEUE_NAME "/messages"
+#define MAX_MSG_LEN 1024
 
 struct actor_arg {
 	char *msg;
@@ -44,10 +45,9 @@ void *dispatch(void *arg) {
 	// todo: make the following a loop
 
 	// wait for and dispatch messages
-	buf = malloc(sizeof(char) * 1024);
+	buf = malloc(sizeof(char) * MAX_MSG_LEN);
 	assert(buf != NULL);
-	while ((nbytes = mq_receive(mq, buf, 1024, 0)) > 0) {
-		printf("Test\n");
+	while ((nbytes = mq_receive(mq, buf, MAX_MSG_LEN, 0)) > 0) {
 		actor = malloc(sizeof(pthread_t));
 		aarg = malloc(sizeof(struct actor_arg));
 		aarg->msg = buf;
@@ -55,11 +55,8 @@ void *dispatch(void *arg) {
 
 		ret = pthread_create(actor, NULL, run_actor, aarg);
 		assert(ret == 0);
-		printf("Test3\n");
 		pthread_join(*actor, NULL);
-		printf("Test4\n");
 	}
-	printf("Test\n");
 	pthread_exit(NULL);
 }
 
@@ -68,7 +65,7 @@ int main(int argc, char** argv) {
 
 	struct mq_attr mqAttr;
     mqAttr.mq_maxmsg = 10;
-    mqAttr.mq_msgsize = 1024;
+    mqAttr.mq_msgsize = MAX_MSG_LEN;
 
 	// create queue, open for writing
 	mqd_t mq = mq_open(QUEUE_NAME, O_CREAT | O_WRONLY, 0644, &mqAttr);
@@ -84,7 +81,6 @@ int main(int argc, char** argv) {
 	ret = pthread_create(&dispatcher, NULL, dispatch, NULL);
 	assert(ret == 0);
 
-	printf("Test2\n");
 	// wait for dispatcher to complete
 	pthread_join(dispatcher, NULL);
 
