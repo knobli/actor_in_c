@@ -42,8 +42,6 @@ void *dispatch(void *arg) {
 	pthread_t *actor;
 	struct actor_arg *aarg;
 
-	// todo: make the following a loop
-
 	// wait for and dispatch messages
 	buf = malloc(sizeof(char) * MAX_MSG_LEN);
 	assert(buf != NULL);
@@ -55,7 +53,12 @@ void *dispatch(void *arg) {
 
 		ret = pthread_create(actor, NULL, run_actor, aarg);
 		assert(ret == 0);
+
+		//TODO: use list of threads and join this at the end
 		pthread_join(*actor, NULL);
+
+		buf = malloc(sizeof(char) * MAX_MSG_LEN);
+		assert(buf != NULL);
 	}
 	pthread_exit(NULL);
 }
@@ -74,6 +77,11 @@ int main(int argc, char** argv) {
 	// send a message
 	char *msg = strdup("hello");
 	ret = mq_send(mq, msg, strlen(msg) + 1, 0);
+	assert(ret == 0);
+
+	// send a message
+	char *msg2 = strdup("hello2");
+	ret = mq_send(mq, msg2, strlen(msg2) + 1, 0);
 	assert(ret == 0);
 
 	// spawn the dispatcher
